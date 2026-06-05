@@ -299,3 +299,39 @@ Tradeoff:
 - WebSockets for real-time updates
 
 This approach significantly reduces database load while providing fast and scalable notification delivery.
+
+# Stage 5
+## What's Wrong With the Current Implementation
+- The biggest problem is that it's a plain sequential loop. For 50,000 students, every student waits for the previous one to finish before anything happens. That means send_email, save_to_db, and push_to_app all run one by one, in order, for every single student. That's going to be extremely slow.
+- There's also no error handling. If send_email fails on student 200, the loop either crashes and stops, or silently moves on. Either way, students 201 onwards might never get the email. There's no retry, no record of who failed, and no way to resume from where it broke.
+- The three operations are tightly coupled too. Email, DB insert, and push notification all happen inside the same loop iteration with no separation. One failure has the potential to affect all three for that student.
+
+## What to Do About the 200 Failed Students
+- The failed student IDs need to be logged at the time of failure. Without that, there's no way to know who didn't get the email. Once you have the list, you reprocess just those 200 — not all 50,000 again.
+
+- This is only possible if the system tracks failures. The current implementation doesn't do that at all, which is why logging who failed and why is a must-have.
+
+## Should Saving to DB and Sending Email Happen Together
+- No, they should not be done together.
+- Saving the data in the DB happens in the local level, fast and reliable. Meaning that there are very few chances for the DB operations to fail. But, the sending the mails purely depends on the external API service and the internet connectivity to the server which is unreliable.
+- The better approach is to always save to the database first. The DB is the source of truth. Email is just a delivery mechanism. If the email fails, the record is still in the database and can be retried later without any data loss.
+
+## Redesigned Approach
+- Instead of processing 50,000 students in a loop, push each student as a job into a message queue. Multiple workers then pull from that queue in parallel. This makes it fast and also gives you automatic retries on failure.
+- Each worker handles one student at a time and follows this order: save to DB first, then send email, then push to app. If email fails, the job is retried. The DB insert is not rolled back. The push notification is best-effort and not critical.
+
+## Revised Pseudocode
+```python
+function notify_all(student_ids: array, message: string):
+for student_id in student_ids:
+enqueue({ student_id, message })
+function process_job(job):
+save_to_db(job.student_id, job.message)
+success = send_email(job.student_id, job.message)
+if not success:
+    log_failure(job.student_id, "email")
+    retry_later(job)
+    return
+
+push_to_app(job.student_id, job.message)
+```
