@@ -234,3 +234,68 @@ Recommended Index:
 CREATE INDEX idx_notifications_type_date
 ON notifications(notificationType, createdAt);
 ```
+
+# Stage 4
+
+## Problem
+
+Notifications are fetched from the database on every page load for every student. As the number of students and notifications grows, this creates a large number of database queries and increases response time.
+
+## Proposed Solutions
+
+### 1. Caching
+
+Store frequently accessed notifications in Redis.
+Redis is used for caching, instead of retrieving the data from the DB everytime, which might increase the request hits to the DB everytime which might increase the load and decrease the retrieval speed.
+
+Benefits:
+- Reduces database load
+- Faster response times
+- Improves user experience
+
+Tradeoff:
+- Additional infrastructure required
+- Cache invalidation must be handled properly
+
+---
+
+### 2. Pagination
+
+Fetch notifications in smaller batches instead of loading all notifications. In this method we use dynamic loading, we only load a set of notifications in that page, after the user selects another page, we then load that set of notifications. This method might decrease load on the server by not loading all the notifications at once.
+
+Example:
+
+```http
+GET /notifications?page=1&limit=20
+```
+
+Benefits:
+- Less data transferred
+- Faster queries
+
+Tradeoff:
+- Requires multiple requests for older notifications
+
+---
+
+### 4. Client-Side Caching
+
+Store recently fetched notifications in the browser and refresh only when needed.
+
+Benefits:
+- Fewer API requests
+- Faster page loads
+
+Tradeoff:
+- Data may become slightly stale, which means that once the data is stored in the client side cache, the main data in the DB might change/
+
+---
+
+## Recommended Architecture
+
+- PostgreSQL for persistent storage
+- Redis for caching unread notifications
+- Pagination for notification history
+- WebSockets for real-time updates
+
+This approach significantly reduces database load while providing fast and scalable notification delivery.
