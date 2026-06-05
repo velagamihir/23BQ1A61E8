@@ -1,0 +1,12 @@
+const express = require("express");
+const json = require("express").json;
+const { Log } = require("./logging_middleware/logging");
+const router = require("./routes/routes");
+const morgan = require("morgan");
+const app = express();
+app.use(morgan("dev"));
+app.use(json());
+app.use("/api", router);
+const port = 8000;
+app.listen(port);
+Log("test-server", "Info", "server", `Test server started on port ${port}`);
