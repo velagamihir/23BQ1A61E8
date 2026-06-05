@@ -27,6 +27,7 @@ All requests require an Authorization header with a Bearer token.
 ## Endpoints
 
 ### Get All Notifications
+
 GET /api/v1/notifications
 
 Optional query params: read (true/false), page, limit
@@ -34,21 +35,25 @@ Optional query params: read (true/false), page, limit
 Returns a list of notifications and basic pagination info.
 
 ### Get One Notification
+
 GET /api/v1/notifications/:id
 
 Returns the full notification object or a 404 if it doesn't exist.
 
 ### Mark One as Read
+
 PATCH /api/v1/notifications/:id/read
 
 No body needed. Returns the updated notification.
 
 ### Mark All as Read
+
 PATCH /api/v1/notifications/read-all
 
 Marks everything as read and returns how many were updated.
 
 ### Delete a Notification
+
 DELETE /api/v1/notifications/:id
 
 Removes the notification and confirms deletion.
@@ -109,6 +114,7 @@ Index on read so filtering unread notifications is fast.
 ---
 
 ## Scaling Problems and Solutions
+
 The notifications table will get large fast, especially for apps with many users. Queries like "get all unread notifications for user X" will slow down. The fix here is partitioning the table by user_id or by created_at (monthly partitions work well). This keeps each partition small and queries fast.
 
 Old notifications pile up and most users never go back to read them. Archiving or deleting notifications older than 90 days keeps the table lean. A background job can handle this on a schedule.
@@ -123,15 +129,15 @@ If the app grows to millions of users, caching unread counts per user in Redis a
 
 Get all notifications for a user:
 
-SELECT * FROM notifications WHERE user_id = 'user_123' ORDER BY created_at DESC LIMIT 20 OFFSET 0;
+SELECT \* FROM notifications WHERE user_id = 'user_123' ORDER BY created_at DESC LIMIT 20 OFFSET 0;
 
 Get only unread notifications:
 
-SELECT * FROM notifications WHERE user_id = 'user_123' AND read = false ORDER BY created_at DESC;
+SELECT \* FROM notifications WHERE user_id = 'user_123' AND read = false ORDER BY created_at DESC;
 
 Get a single notification:
 
-SELECT * FROM notifications WHERE id = 'notif_01' AND user_id = 'user_123';
+SELECT \* FROM notifications WHERE id = 'notif_01' AND user_id = 'user_123';
 
 Mark one notification as read:
 
@@ -151,4 +157,80 @@ INSERT INTO notifications (id, user_id, type, title, body) VALUES ('notif_99', '
 
 Count unread notifications (for badges/indicators):
 
-SELECT COUNT(*) FROM notifications WHERE user_id = 'user_123' AND read = false;
+SELECT COUNT(\*) FROM notifications WHERE user_id = 'user_123' AND read = false;
+
+# Stage 3
+
+## Analysis of Current Query
+
+Current Query:
+
+```sql
+SELECT *
+FROM notifications
+WHERE studentID = 1042
+AND isRead = false
+ORDER BY createdAt DESC;
+```
+
+### Why is it slow?
+
+With 5,000,000 notifications, the database may perform a large table scan to find matching rows and then sort them. This increases query execution time as data grows.
+
+### Recommended Improvement
+
+Create a composite index:
+
+```sql
+CREATE INDEX idx_notifications_student_read_created
+ON notifications(studentID, isRead, createdAt DESC);
+```
+
+Benefits:
+
+- Faster filtering by `studentID`
+- Faster filtering by `isRead`
+- Faster ordering by `createdAt`
+
+### Computational Cost
+
+Without index:
+
+- Time Complexity: O(N)
+
+With composite index:
+
+- Time Complexity: O(log N)
+
+---
+
+## Should We Add Indexes on Every Column?
+
+No.
+
+Adding indexes on every column is not effective because:
+
+- Increases storage usage
+- Slows INSERT, UPDATE, and DELETE operations
+- Many indexes may never be used
+- Database optimizer may ignore unnecessary indexes
+
+Indexes should only be added on frequently queried columns.
+
+---
+
+## Query: Students Who Received Placement Notifications in Last 7 Days
+
+```sql
+SELECT DISTINCT studentID
+FROM notifications
+WHERE notificationType = 'Placement'
+AND createdAt >= NOW() - INTERVAL 7 DAY;
+```
+
+Recommended Index:
+
+```sql
+CREATE INDEX idx_notifications_type_date
+ON notifications(notificationType, createdAt);
+```
